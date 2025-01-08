@@ -5,6 +5,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Handlers.UseMyTable
@@ -35,12 +37,12 @@ getMyTables
        , MonadFail m
        , (Default (Inferrable O.FromField) O.SqlTimestamptz ZonedTime)
        )
-    => MyUUID
+    => MyUUID UUID
     -> m [MyTable]
 getMyTables myUUID = do
     rows <- runSelectWithPool $ selectMyTable (toUUID myUUID)
-    mtIds <- (mtId) <$> rows
-    -- uuids <- pure $ (MyUUID . mtId) <$> rows
+    mtIds <- pure $ mtId <$> rows
+    uuids <- pure $ (MyUUID . mtId) <$> rows
     liftIO $ pure $ rows
 
 -------------------------------------------------------
