@@ -1,3 +1,4 @@
+{-# LANGUAGE GHC2021 #-}
 -- DerivingStrategies needed to derive Show for newtype
 {-# LANGUAGE DerivingStrategies #-}
 -- FlexibleInstances needed for makeAdaptorAndInstance
@@ -27,13 +28,15 @@ module Entities.MyTable
     , toResult
     ) where
 
-import Data.Profunctor.Product.Default
+import qualified Data.Profunctor.Product.Default as D
 import Data.Profunctor.Product.TH (makeAdaptorAndInstanceInferrable)
-import Data.Text (Text)
 import Data.Time
 import Data.UUID
 import GHC.Int (Int64)
 import Opaleye
+import Opaleye.Experimental.Enum
+-- NB Opaleye should export Inferrable from a public module
+import Opaleye.Internal.Inferrable
 
 -- CREATE TABLE my_table (
 --   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY
@@ -43,16 +46,23 @@ import Opaleye
 --   , updated_at timestamptz NOT NULL DEFAULT 'epoch'
 -- );
 
-newtype MyTableId = MyTableId Int64 deriving (Show)
-data MyUUID = MyUUID UUID
+newtype MyTableId a = MyTableId a deriving (Show)
+
+$(makeAdaptorAndInstanceInferrable "pMyTableId" ''MyTableId)
+
+newtype MyUUID a = MyUUID a
+
+$(makeAdaptorAndInstanceInferrable "pMyUUID" ''MyUUID)
 
 -- NOTE: This is how I am handling UUID conversion for now.
 -- Will be refactored at some point.
 class ToUUID a where
     toUUID :: a -> UUID
 
-instance ToUUID MyUUID where
+instance ToUUID (MyUUID UUID) where
     toUUID (MyUUID a) = a
+
+data SqlResult
 
 data Result
     = APPL -- Apple
@@ -60,12 +70,32 @@ data Result
     | PEAR -- Pear
     deriving (Show)
 
-toResult :: Text -> Maybe Result
+toResult :: String -> Maybe Result
 toResult a = case a of
     "APPL" -> Just APPL
     "ORNG" -> Just ORNG
     "PEAR" -> Just PEAR
     _ -> Nothing
+
+fromResult :: Result -> String
+fromResult a = case a of
+    APPL -> "APPL"
+    ORNG -> "ORNG"
+    PEAR -> "PEAR"
+
+sqlResultMapper :: EnumMapper SqlResult Result
+sqlResultMapper =
+  enumMapper "text" toResult fromResult
+
+instance DefaultFromField SqlResult Result where
+  defaultFromField = enumFromField sqlResultMapper
+
+instance result ~ Result
+  => D.Default (Inferrable FromField) SqlResult result where
+  def = Inferrable D.def
+
+instance D.Default ToFields Result (Field SqlResult) where
+  def = enumToFields sqlResultMapper
 
 data MyTableT a b c d e = MyTable
     { mtId :: a
@@ -78,25 +108,25 @@ data MyTableT a b c d e = MyTable
 
 type MyTable =
     MyTableT
-        MyTableId -- id
+        (MyTableId Int64) -- id
         Result -- result
-        MyUUID -- my_uuid
+        (MyUUID UUID) -- my_uuid
         ZonedTime -- created_at
         ZonedTime -- updated_at
 
 type MyTableTableR =
     MyTableT
-        (Field SqlInt8)
-        (Field SqlText)
-        (Field SqlUuid)
+        (MyTableId (Field SqlInt8))
+        (Field SqlResult)
+        (MyUUID (Field SqlUuid))
         (Field SqlTimestamptz)
         (Field SqlTimestamptz)
 
 type MyTableTableW =
     MyTableT
         () -- readOnly
-        (Field SqlText)
-        (Field SqlUuid)
+        (Field SqlResult)
+        (MyUUID (Field SqlUuid))
         (Maybe (Field SqlTimestamptz))
         (Maybe (Field SqlTimestamptz))
 
@@ -108,17 +138,10 @@ myTableTable =
         "my_table"
         ( pMyTable
             MyTable
-                { mtId = omitOnWriteTableField "id"
+                { mtId = fmap MyTableId (omitOnWriteTableField "id")
                 , mtResult = requiredTableField "result"
-                , mtMyUUID = requiredTableField "my_uuid"
+                , mtMyUUID = pMyUUID (MyUUID (requiredTableField "my_uuid"))
                 , mtCreatedAt = optionalTableField "created_at"
                 , mtUpdatedAt = optionalTableField "updated_at"
                 }
         )
-instance Default ToFields MyTableId (Field SqlInt8) where
-    def = toToFields $ toFields . getRecId
-      where
-        getRecId (MyTableId a) = a
-
-instance DefaultFromField SqlInt8 MyTableId where
-    defaultFromField = fmap MyTableId fromPGSFromField

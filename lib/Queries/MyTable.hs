@@ -14,7 +14,7 @@ import Opaleye
 insertMyTable
     :: Result
     -- ^ Result
-    -> MyUUID
+    -> MyUUID UUID
     -- ^ MyTable UUID
     -> Insert [UUID]
 insertMyTable result myUUID =
@@ -23,12 +23,12 @@ insertMyTable result myUUID =
         , iRows =
             [ MyTable
                 ()
-                (sqlStrictText (T.pack $ show result))
-                (sqlUUID (toUUID myUUID))
+                (toFields result)
+                (MyUUID (sqlUUID (toUUID myUUID)))
                 Nothing
                 Nothing
             ]
-        , iReturning = rReturningI (\(MyTable _ _ mtuuid _ _) -> mtuuid)
+        , iReturning = rReturningI (\(MyTable _ _ (MyUUID mtuuid) _ _) -> mtuuid)
         , iOnConflict = Nothing
         }
 
@@ -38,6 +38,6 @@ selectMyTable
     -- ^ CandidateId
     -> Select MyTableTableR
 selectMyTable myUUID = do
-    rows@(MyTable _ _ mtuuid _ _) <- selectTable myTableTable
+    rows@(MyTable _ _ (MyUUID mtuuid) _ _) <- selectTable myTableTable
     where_ (mtuuid .== toFields myUUID)
     pure rows
